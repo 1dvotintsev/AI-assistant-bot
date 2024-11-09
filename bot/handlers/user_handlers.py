@@ -19,12 +19,13 @@ async def cmd_start(msg: Message, state:FSMContext) -> None:
     await state.clear()
     if not await User.is_exist(msg.from_user.id):
         
-        await User.reg_user(msg.from_user.id, msg.from_user.username, 0)
+        await User.reg_user(msg.from_user.id, msg.from_user.username)
         
         await msg.answer(f"Привет, {msg.from_user.first_name}, добро пожаловать в сообщество AI assistant. Вот твой личный кабинет", 
                         reply_markup=main_menu)
     else:
-        await msg.answer(text=f"Информация о профиле\nИмя: {msg.from_user.username}\nЗагружено датасетов: soon...\nЗагружено моделей: soon\nБаланс: soon...",
+        data = await User.get_user_info(msg.from_user.id)
+        await msg.answer(text=f"Информация о профиле\nИмя: {msg.from_user.username}\nЗагружено датасетов: {data[0]}\nЗагружено моделей: {data[1]}\nБаланс: {data[2]}",
                          reply_markup=main_menu)
 
 
