@@ -9,6 +9,11 @@ from bot.keyboards.user_keyboards import empty, back_to_main_menu
 
 add_dataset = InlineKeyboardButton(text="Загрузить датасет", callback_data='add_dataset')
 
+status = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text='Размечен', callback_data='done')],
+    [InlineKeyboardButton(text='Не размечен', callback_data='notdone')],
+])
+
 async def my_datasets_menu(state:FSMContext) -> InlineKeyboardMarkup:
     data = await state.get_data()
     user_id = data.get('user_id')

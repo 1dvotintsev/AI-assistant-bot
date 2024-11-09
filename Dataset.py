@@ -34,14 +34,14 @@ class Dataset:
             print(f"Error: {e}")
     
     
-    async def insert_into_db(dataset_id, user_id, name, description) -> bool:
+    async def insert_into_db(dataset_id, user_id, name, description, ext, size, status) -> bool:
         try:
             async with await AsyncConnection.connect(CONNECTION) as connection:
                 async with connection.cursor() as cursor:
                     await cursor.execute(
                         """INSERT INTO datasets (dataset_id, user_id, name, description, format, size, status, is_public)
                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s);""",
-                        (dataset_id, user_id, name, description, '.com', 1, 'done', False)
+                        (dataset_id, user_id, name, description, ext, size, status, False)
                     )
                     await connection.commit()  # Не забудь зафиксировать изменения
                     
