@@ -1,5 +1,5 @@
 from config import DATASET_EXTENSIONS
-
+import os
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -10,7 +10,7 @@ from aiogram.filters import Command
 
 from Dataset import Dataset
 
-from bot.keyboards.my_datasets_keybords import my_datasets_menu, status
+from bot.keyboards.my_datasets_keybords import my_datasets_menu, my_datasets_settings, status
 
 from bot.keyboards.user_keyboards import main_menu
 
@@ -32,6 +32,23 @@ async def run_model(callback: CallbackQuery, state:FSMContext) -> None:
     await state.update_data(user_id = callback.from_user.id)
     await callback.message.edit_text(text="Ваши сохраненные датасеты:",
                                      reply_markup= await my_datasets_menu(state))
+    
+
+@router.callback_query(lambda c: c.data.startswith('dataset_launch'))
+async def info(callback: CallbackQuery, state: FSMContext) -> None:
+    #сохраняем данные
+    dataset_name = callback.data.split('_')[-1]
+    data = await Dataset.dataset_info(dataset_name)
+    
+    if data:
+        await state.update_data(public = data[-1])
+        await state.update_data(dataset_name_set = dataset_name)
+        await state.update_data(userid_myset = callback.from_user.id)
+        await callback.message.edit_text(text = f"{dataset_name}\nОписание: {data[0]}\nФормат: {data[1]}\nРазмер: {data[2]}\nСтатус: {data[3]}\nАвтор @{data[4]}",
+                                reply_markup = await my_datasets_settings(state))
+    else:
+        await callback.message.answer(text="Что-то пожно не так, похоже данные повреждены!")
+    
 
 
 @router.callback_query(F.data == 'add_dataset')
@@ -104,5 +121,49 @@ async def get_description(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.message.answer(text= "Все прошло успешно" if await Dataset.insert_into_db(dataset_id, user_id, name, description, dataset_ext, size, 'not done') else "Что-то пошло не так",
                      reply_markup=main_menu)
     await state.clear()
-   
     
+    
+@router.callback_query(lambda c: c.data.startswith('change_public'))
+async def info(callback: CallbackQuery, state: FSMContext) -> None:
+    dataset_name = callback.data.split('_')[-1]
+    
+    if await Dataset.change_public(dataset_name):
+        await callback.message.edit_text(text = "Изменение произошло успешно!",
+                                reply_markup = main_menu)
+    else:
+        await callback.message.answer(text="Что-то пожно не так, похоже данные повреждены!",
+                                      reply_markup= main_menu)
+   
+
+@router.callback_query(lambda c: c.data.startswith('dataset_delete'))
+async def info(callback: CallbackQuery, state: FSMContext) -> None:
+    dataset_name = callback.data.split('_')[-1]
+    
+    if await Dataset.delete_user_dataset(callback.from_user.id, dataset_name):
+        await callback.message.edit_text(text = "Удаление произошло успешно!",
+                                reply_markup = main_menu)
+    else:
+        await callback.message.answer(text="Что-то пожно не так, похоже данные повреждены!",
+                                      reply_markup= main_menu)
+        
+        
+from aiogram.types import FSInputFile
+
+@router.callback_query(F.data == 'download')
+async def download(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
+    data = await state.get_data()
+    dataset_name = data.get('dataset_name_set')
+    dataset_id, format = map(str, await Dataset.get_id(dataset_name))
+
+    if dataset_id:
+        file_name = f"{dataset_id}"
+        file_path = os.path.join('Datasets', file_name)
+
+        # Проверка, существует ли файл
+        if os.path.exists(file_path):
+            await callback.bot.send_document(chat_id=callback.from_user.id, document=FSInputFile(file_path, filename=f'{dataset_name}.{format}'))
+        else:
+            await callback.message.answer(f"Файл {file_path} не найден.")
+    else:
+        await callback.message.answer("Файл вообще не найден.")

@@ -1,6 +1,8 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-
+from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+
+from Dataset import Dataset
 
 
 main_menu = InlineKeyboardMarkup(inline_keyboard=[
@@ -34,12 +36,12 @@ async def models_menu() -> InlineKeyboardMarkup:
 
 async def datasets_menu() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    sets = ['set1', 'set2']
+    public_datasets = await Dataset.public_datasets()
     
-    if sets:
-        for set in sets:
-            kb.add(InlineKeyboardButton(text=set, callback_data=f'set_launch_{set}'))
-        kb.add(back_to_main_menu)    
+    if public_datasets:
+        for dataset in public_datasets:
+            kb.add(InlineKeyboardButton(text=dataset, callback_data=f'set_launch_{dataset}'))
+        kb.add(back_to_main_menu)
     
         return kb.adjust(1).as_markup()
     else:
