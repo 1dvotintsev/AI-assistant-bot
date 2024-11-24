@@ -2,13 +2,14 @@ from aiogram import F, Router
 
 from User import User
 
-from aiogram.filters import CommandStart, Command
+from aiogram.filters import CommandStart
 
 from aiogram.types import Message, CallbackQuery
 
 from bot.keyboards.user_keyboards import main_menu, models_menu, datasets_menu, orders_menu
 
 from aiogram.fsm.context import FSMContext
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 router = Router()
@@ -34,15 +35,16 @@ async def cmd_start(msg: Message, state:FSMContext) -> None:
 async def cmd_start(callback: CallbackQuery, state:FSMContext) -> None:
     await state.clear()
     await callback.answer()
-    await callback.message.edit_text(text=f"Информация о профиле\nИмя: {callback.from_user.username}\nЗагружено датасетов: soon...\nЗагружено моделей: soon\nБаланс: soon...",
+    data = await User.get_user_info(callback.from_user.id)
+    await callback.message.edit_text(text=f"Информация о профиле\nИмя: {callback.from_user.username}\nЗагружено датасетов: {data[0]}\nЗагружено моделей: {data[1]}\nБаланс: {data[2]}",
                          reply_markup=main_menu)
         
 
 @router.callback_query(F.data == 'models_menu')
-async def all_models(callback: CallbackQuery) -> None:
+async def all_models(callback: CallbackQuery, session: AsyncSession) -> None:
     await callback.answer()
     await callback.message.edit_text(text="Для подробной информации выберете одну из моделей",
-                                  reply_markup=await models_menu())
+                                  reply_markup=await models_menu(session))
 
 
 @router.callback_query(F.data == 'datasets_menu')

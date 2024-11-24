@@ -1,9 +1,10 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from Dataset import Dataset
-
+from database.orm_model import orm_get_models
 
 main_menu = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="Все модели", callback_data='models_menu')],
@@ -17,9 +18,9 @@ empty = InlineKeyboardButton(text="Данных пока нет", callback_data=
 
 back_to_main_menu = InlineKeyboardButton(text='Назад', callback_data='main' )
 
-async def models_menu() -> InlineKeyboardMarkup:
+async def models_menu(session: AsyncSession) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
-    models = ['gpt', 'alisa']
+    models = await orm_get_models(session)
     
     if models:
         for model in models:

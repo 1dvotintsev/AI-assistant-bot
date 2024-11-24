@@ -1,0 +1,25 @@
+"filename", "language", "Python", "Docker", "YAML", "pip requirements", "Markdown", "Ignore", "comment", "blank", "total"
+"d:\projects\botai\.dockerignore", "Ignore", 0, 0, 0, 0, 0, 5, 0, 1, 6
+"d:\projects\botai\Dataset.py", "Python", 219, 0, 0, 0, 0, 0, 11, 36, 266
+"d:\projects\botai\Datasets\__init__.py", "Python", 0, 0, 0, 0, 0, 0, 0, 1, 1
+"d:\projects\botai\Dockerfile", "Docker", 0, 7, 0, 0, 0, 0, 0, 0, 7
+"d:\projects\botai\Model.py", "Python", 7, 0, 0, 0, 0, 0, 0, 3, 10
+"d:\projects\botai\README.md", "Markdown", 0, 0, 0, 0, 3, 0, 0, 0, 3
+"d:\projects\botai\User.py", "Python", 54, 0, 0, 0, 0, 0, 2, 8, 64
+"d:\projects\botai\bot\__init__.py", "Python", 0, 0, 0, 0, 0, 0, 0, 1, 1
+"d:\projects\botai\bot\handlers\__init__.py", "Python", 0, 0, 0, 0, 0, 0, 0, 1, 1
+"d:\projects\botai\bot\handlers\dataset_handlers.py", "Python", 39, 0, 0, 0, 0, 0, 2, 23, 64
+"d:\projects\botai\bot\handlers\models_handlers.py", "Python", 43, 0, 0, 0, 0, 0, 3, 30, 76
+"d:\projects\botai\bot\handlers\my_datasets_handler.py", "Python", 126, 0, 0, 0, 0, 0, 3, 41, 170
+"d:\projects\botai\bot\handlers\my_models_handler.py", "Python", 50, 0, 0, 0, 0, 0, 0, 23, 73
+"d:\projects\botai\bot\handlers\user_handlers.py", "Python", 39, 0, 0, 0, 0, 0, 0, 21, 60
+"d:\projects\botai\bot\keyboards\__init__.py", "Python", 0, 0, 0, 0, 0, 0, 0, 1, 1
+"d:\projects\botai\bot\keyboards\dataset_keybords.py", "Python", 19, 0, 0, 0, 0, 0, 0, 8, 27
+"d:\projects\botai\bot\keyboards\model_keyboards.py", "Python", 11, 0, 0, 0, 0, 0, 0, 4, 15
+"d:\projects\botai\bot\keyboards\my_datasets_keybords.py", "Python", 48, 0, 0, 0, 0, 0, 0, 15, 63
+"d:\projects\botai\bot\keyboards\my_models_keyboards.py", "Python", 21, 0, 0, 0, 0, 0, 0, 10, 31
+"d:\projects\botai\bot\keyboards\user_keyboards.py", "Python", 49, 0, 0, 0, 0, 0, 0, 20, 69
+"d:\projects\botai\docker-compose.yml", "YAML", 0, 0, 5, 0, 0, 0, 0, 0, 5
+"d:\projects\botai\main.py", "Python", 22, 0, 0, 0, 0, 0, 0, 9, 31
+"d:\projects\botai\requirements.txt", "pip requirements", 0, 0, 0, 41, 0, 0, 0, 0, 41
+"Total", "-", 747, 7, 5, 41, 3, 5, 21, 256, 1085
