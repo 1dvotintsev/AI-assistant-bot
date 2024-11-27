@@ -18,6 +18,10 @@ empty = InlineKeyboardButton(text="Данных пока нет", callback_data=
 
 back_to_main_menu = InlineKeyboardButton(text='Назад', callback_data='main' )
 
+back_to_main_menu_mk = InlineKeyboardMarkup(inline_keyboard=[
+    [back_to_main_menu],
+])
+
 async def models_menu(session: AsyncSession) -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     models = await orm_get_models(session)
