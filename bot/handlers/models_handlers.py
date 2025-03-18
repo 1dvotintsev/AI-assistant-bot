@@ -25,7 +25,7 @@ async def stop_model(msg: Message, state: FSMContext) -> None:
     data = await state.get_data()
     
     if data.get('model_run'):
-        # сдесь реально отанавливаем модель
+        # Здесь реально отанавливаем модель
         await state.update_data(model_name = None, model_run = False)
         await msg.answer(text=f"Работа модели {data.get('model_name')} прекращена.")
     else:

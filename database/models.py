@@ -1,4 +1,4 @@
-from sqlalchemy import String, Text, BigInteger, ForeignKey, Boolean, Integer, Numeric, func
+from sqlalchemy import String, Text, BigInteger, ForeignKey, Boolean, Integer, Numeric, func, CheckConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -50,3 +50,17 @@ class UsersDatasets(Base):
 
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.user_id", ondelete="CASCADE"), primary_key=True)
     dataset_id: Mapped[str] = mapped_column(String, ForeignKey("datasets.dataset_id", ondelete="CASCADE"), primary_key=True)
+    
+    
+class Transactions(Base):
+    __tablename__ = "transactions"
+
+    hash: Mapped[str] = mapped_column(Text, primary_key=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
+    value: Mapped[float] = mapped_column(Numeric(15, 4), nullable=False)
+    type: Mapped[str] = mapped_column(String(10), nullable=False)
+    address: Mapped[str] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint("type IN ('deposit', 'withdraw')", name="check_transaction_type"),
+    )
