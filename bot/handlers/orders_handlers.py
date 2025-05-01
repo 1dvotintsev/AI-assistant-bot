@@ -4,6 +4,8 @@ from __future__ import annotations
 import random
 from datetime import datetime
 from decimal import Decimal
+from uuid import uuid4
+from datetime import datetime
 
 from aiogram import Router, F
 from aiogram.types import (
@@ -19,7 +21,7 @@ from sqlalchemy import select, text, func, update
 from sqlalchemy.dialects.postgresql import insert 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from database.models import Datasets, Tasks, Annotations  # ORM-классы
+from database.models import Datasets, Tasks, Annotations, DatasetContributions, Users, Transactions  # ORM-классы
 from bot.keyboards.user_keyboards import back_to_main_menu
 
 router = Router()
@@ -198,53 +200,66 @@ async def handle_answer(
     dataset_id: str = data["dataset_id"]
 
     async with session.begin():
-        # 1. Записываем аннотацию (если её ещё нет)
-        await session.execute(
-    insert(Annotations)          # ← теперь это Postgres-insert
-        .values(
-            task_id=task_id,
-            user_id=callback.from_user.id,
-            label=label_val,
-        )
-        .on_conflict_do_nothing()
-)
 
-        # 2. Обновляем счётчик
+        # 1. Аннотация (idempotent)
         await session.execute(
-            text(
-                """
-                update tasks
-                set annotated_cnt = annotated_cnt + 1
-                where task_id = :tid
-                """
-            ),
+            insert(Annotations)
+            .values(
+                task_id=task_id,
+                user_id=callback.from_user.id,
+                label=label_val,
+            )
+            .on_conflict_do_nothing()
+        )
+
+        # 2. Инкремент счётчика задач
+        await session.execute(
+            text("UPDATE tasks SET annotated_cnt = annotated_cnt + 1 WHERE task_id=:tid"),
             {"tid": task_id},
         )
 
-        # 3. Если задача набрала нужное число голосов — закрываем
+        # 3. Учёт вклада
+        await session.execute(
+            insert(DatasetContributions)
+            .values(
+                dataset_id=dataset_id,
+                user_id=callback.from_user.id,
+                vote_cnt=1,
+            )
+            .on_conflict_do_update(
+                index_elements=["dataset_id", "user_id"],
+                set_={"vote_cnt": DatasetContributions.vote_cnt + 1},
+            )
+        )
+
+        # 4. Закрываем задачу, если лимит набран
         await session.execute(
             text(
                 """
-                update tasks
-                set status='done'
-                where task_id = :tid
-                  and annotated_cnt >= (
-                        select annotations_per_task
-                        from datasets
-                        where dataset_id = :ds
-                  )
+                UPDATE tasks
+                   SET status='done'
+                 WHERE task_id=:tid
+                   AND annotated_cnt >= (
+                         SELECT annotations_per_task
+                           FROM datasets
+                          WHERE dataset_id=:ds
+                       )
                 """
             ),
             {"tid": task_id, "ds": dataset_id},
         )
 
-    # 4. Отправляем следующую
+        # 5.  Попытка закрыть весь датасет
+        await maybe_finish_dataset(session, dataset_id)
+
+    # 6. Шлём следующую задачу (вне транзакции)
     await send_next_task(
         chat_id=callback.from_user.id,
         session=session,
         state=state,
         bot=callback.bot,
     )
+
 
 
 # ===============================================================
@@ -320,3 +335,76 @@ async def send_next_task(
         reply_markup=kb,
         parse_mode="HTML",
     )
+    
+
+async def maybe_finish_dataset(session: AsyncSession, dataset_id: str) -> None:
+    """
+    Если все tasks размечены → проставляем status='done', распределяем reward_pool.
+    Запускать ТОЛЬКО внутри already-opened transaction!
+    """
+    # есть ли ещё живые задачи?
+    remain = await session.scalar(
+        select(func.count())
+        .select_from(Tasks)
+        .where(
+            Tasks.dataset_id == dataset_id,
+            Tasks.annotated_cnt < (
+                select(Datasets.annotations_per_task)
+                .where(Datasets.dataset_id == dataset_id)
+                .scalar_subquery()
+            ),
+        )
+    )
+    if remain:        # ещё не всё размечено
+        return
+
+    # --- закрываем датасет ------------------------------------------
+    ds: Datasets = await session.scalar(
+        select(Datasets).where(Datasets.dataset_id == dataset_id).with_for_update()
+    )
+    if ds.status == "done":      # кто-то уже выплатил
+        return
+
+    ds.status = "done"
+    ds.closed_at = datetime.utcnow()
+
+    # --- распределяем деньги ---------------------------------------
+    if ds.reward_pool and ds.reward_pool > 0:
+        # суммарное кол-во голосов
+        total_votes = await session.scalar(
+            select(func.sum(DatasetContributions.vote_cnt))
+            .where(DatasetContributions.dataset_id == dataset_id)
+        )
+        if not total_votes:
+            total_votes = 0
+
+        if total_votes == 0:
+            # голосов нет — вернём деньги заказчику?
+            ds.reward_pool = 0
+            return
+
+        reward_per_vote = ds.reward_pool / Decimal(total_votes)
+
+        # берём всех участников
+        rows = await session.execute(
+            select(
+                DatasetContributions.user_id,
+                DatasetContributions.vote_cnt,
+            ).where(DatasetContributions.dataset_id == dataset_id)
+        )
+        for uid, votes in rows:
+            amount = reward_per_vote * votes
+
+            # 1. users.balance
+            await session.execute(
+                text(
+                    "UPDATE users SET balance = balance + :amt WHERE user_id=:uid"
+                ),
+                {"amt": amount, "uid": uid},
+            )
+
+            
+
+        # 3. обнуляем пул
+        ds.reward_pool = 0
+

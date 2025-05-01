@@ -124,3 +124,11 @@ class TaskResults(Base):
     final_label: Mapped[bool | None] = mapped_column(Boolean)
     confidence:  Mapped[Decimal | None] = mapped_column(Numeric(5, 2))
     closed_at:   Mapped[datetime | None] = mapped_column(TIMESTAMP)
+    
+
+class DatasetContributions(Base):
+    __tablename__ = "dataset_contributions"
+    dataset_id: Mapped[str]  = mapped_column(Text, primary_key=True)
+    user_id:    Mapped[int]  = mapped_column(BigInteger, primary_key=True)
+    vote_cnt:   Mapped[int]  = mapped_column(Integer, default=0)
+
