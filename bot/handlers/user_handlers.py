@@ -56,11 +56,11 @@ async def all_datasets(callback: CallbackQuery) -> None:
                                   reply_markup=await datasets_menu())
     
     
-@router.callback_query(F.data == 'orders_menu')
-async def all_orders(callback: CallbackQuery) -> None:
-    await callback.answer()
-    await callback.message.edit_text(text="Выберете один из датасетов для разметки",
-                                  reply_markup=await orders_menu())
+#@router.callback_query(F.data == 'orders_menu')
+#async def all_orders(callback: CallbackQuery) -> None:
+#    await callback.answer()
+#    await callback.message.edit_text(text="Выберете один из датасетов для разметки",
+#                                  reply_markup=await orders_menu())
     
     
 @router.callback_query(F.data == 'balance')

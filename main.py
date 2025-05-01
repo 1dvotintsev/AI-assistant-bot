@@ -13,6 +13,7 @@ from bot.handlers.dataset_handlers import router as dataset_router
 from bot.handlers.my_models_handler import router as my_models_router
 from bot.handlers.my_datasets_handler import router as my_datasets_router
 from bot.handlers.balance_handlers import router as balance_router
+from bot.handlers.orders_handlers import router as order_router
 
 
 bot = Bot(token = TOKEN)
@@ -26,6 +27,7 @@ async def main() -> None:
     dp.include_router(my_models_router)
     dp.include_router(my_datasets_router)
     dp.include_router(balance_router)
+    dp.include_router(order_router)
     dp.update.middleware(DataBaseSession(session_pool=async_session))
     await dp.start_polling(bot)
     

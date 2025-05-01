@@ -16,6 +16,12 @@ status = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text='Не размечен', callback_data='notdone')],
 ])
 
+need_markup = InlineKeyboardBuilder().button(
+        text="Нужна разметка", callback_data="labeling_yes"
+    ).button(
+        text="Только загрузить", callback_data="labeling_no"
+    ).as_markup()
+
 async def my_datasets_menu(state: FSMContext) -> InlineKeyboardMarkup:
     data = await state.get_data()
     user_id = data.get('user_id')

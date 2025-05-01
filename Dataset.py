@@ -1,13 +1,114 @@
 import os
 from config import CONNECTION
 from config import DATASET_EXTENSIONS
-
+from decimal import Decimal
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
 from aiogram.types import Message
-
+from uuid import uuid4
 from psycopg import AsyncConnection
 import psycopg
+import pandas as pd
+import json
 
 class Dataset:
+    
+    # --- проверка csv и распарсивание ---------------------------------
+    @staticmethod
+    async def verify_csv(file_path: str) -> tuple[bool, int]:
+        """True/False + кол-во строк (без header)."""
+        import pandas as pd
+        try:
+            df = pd.read_csv(file_path)
+            return (df.shape[1] == 1, len(df))
+        except Exception:
+            return (False, 0)
+
+    # --- создание записи датасета + задач ------------------------------
+    @staticmethod
+    async def create_labeling_job(
+        *,
+        session: AsyncSession,
+        user_id: int,
+        name: str,
+        description: str,
+        csv_path: str,
+        file_id: str,
+        pos_label: str,
+        neg_label: str,
+        annotations_per_task: int,
+        pool_amount: Decimal
+    ) -> bool:
+
+        async with session.begin():             # atomic txn
+            # 1) Проверяем баланс и списываем
+            balance_row = await session.execute(
+                text("SELECT balance FROM users WHERE user_id=:uid FOR UPDATE"),
+                {"uid": user_id}
+            )
+            balance = balance_row.scalar_one()
+            if balance < pool_amount:
+                return False
+
+            await session.execute(
+                text("UPDATE users SET balance = balance - :amt WHERE user_id=:uid"),
+                {"amt": pool_amount, "uid": user_id}
+            )
+
+            # 2) Регистрируем датасет
+            dataset_id = uuid4().hex
+            size = os.path.getsize(csv_path)
+
+            labels_json = json.dumps({"pos": pos_label, "neg": neg_label})
+
+            await session.execute(
+    text("""
+        INSERT INTO datasets
+          (dataset_id, user_id, name, description,
+           format, size, status,
+           labels, annotations_per_task, reward_pool)
+        VALUES
+          (:dsid, :uid, :name, :desc,
+           'csv', :size, 'labeling',
+           (:labels)::jsonb,          -- ← скобки!
+           :apt, :pool)
+    """),
+    {
+        "dsid":   dataset_id,
+        "uid":    user_id,
+        "name":   name,
+        "desc":   description,
+        "size":   size,
+        "labels": json.dumps({"pos": pos_label, "neg": neg_label}),
+        "apt":    annotations_per_task,
+        "pool":   pool_amount
+    }
+)
+
+
+            # 3) Файл
+            await session.execute(text("""
+                INSERT INTO dataset_files(dataset_id,uri,original_name,size)
+                VALUES(:dsid,:uri,:name,:size)
+            """), {
+                "dsid": dataset_id,
+                "uri": f"tg://{file_id}",
+                "name": os.path.basename(csv_path),
+                "size": size
+            })
+
+            # 4) Режем на tasks
+            df = pd.read_csv(csv_path, header=None)
+            # bulk insert через executemany
+            await session.execute(text("""
+                INSERT INTO tasks(dataset_id,text_row)
+                VALUES(:dsid,:row)
+            """), [{"dsid": dataset_id, "row": r[0]} for r in df.itertuples(index=False)])
+        
+        await Dataset.save(user_id, name)
+
+        # commit произойдёт автоматически по выходу из session.begin()
+        return True
     
     async def download(msg: Message) -> bool:
         try:

@@ -3,24 +3,28 @@ import os
 from aiogram import F, Router
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-
+from sqlalchemy.ext.asyncio import AsyncSession
 from aiogram.types import CallbackQuery, Message, ContentType
-
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 from aiogram.filters import Command
 
 from Dataset import Dataset
+from decimal import Decimal, InvalidOperation
 
-from bot.keyboards.my_datasets_keybords import my_datasets_menu, my_datasets_settings, status
+from bot.keyboards.my_datasets_keybords import my_datasets_menu, my_datasets_settings, status, need_markup
 
 from bot.keyboards.user_keyboards import main_menu
 
 
 class UploadDataset(StatesGroup):
-    adding = State()
-    dataset_name = State()
+    adding              = State()   # файл
+    need_labeling       = State()   # да/нет
+    dataset_name        = State()
     dataset_description = State()
-    dataset_acces = State()
-    dataset_status = State()
+    label_positive      = State()
+    label_negative      = State()
+    reward_pool         = State()
+    confirm             = State()
     
 
 router = Router()
@@ -63,20 +67,38 @@ async def drop_form(msg: Message, state: FSMContext) -> None:
     
     
 @router.message(UploadDataset.adding)
-async def get_file(msg: Message, state:FSMContext) -> None:
-    if await Dataset.download(msg):
-        # Получаем файл из сообщения
-        file = msg.document
-        file_extension = file.file_name.split('.')[-1] if '.' in file.file_name else None
-        file_size = file.file_size
-        await state.update_data(dataset_id = msg.document.file_id)
-        await state.update_data(dataset_ext = file_extension)
-        await state.update_data(dataset_size = file_size)
-        await msg.answer(text="Как назовем датасет?")
-        await state.set_state(UploadDataset.dataset_name)
-    else:
-        await msg.answer(text="Нужно отправить определенный файл, попробуйте еще раз.")
+async def get_file(msg: Message, state: FSMContext):
+    if not await Dataset.download(msg):
+        await msg.answer("Пришли CSV-файл.")
+        return
 
+    ok, rows = await Dataset.verify_csv(f"Datasets/{msg.document.file_id}")
+    if not ok:
+        await msg.answer("CSV должен содержать ровно одну колонку 🤷‍♂️")
+        return
+
+    await state.update_data(
+        dataset_id = msg.document.file_id,
+        dataset_size = msg.document.file_size,
+        csv_rows = rows
+    )
+    await msg.answer("Требуется ли разметка датасета?", reply_markup=need_markup)
+    await state.set_state(UploadDataset.need_labeling)
+
+
+@router.callback_query(F.data == 'labeling_no', UploadDataset.need_labeling)
+async def just_store(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    # …тут оставь старый сценарий (name → desc → статус) …
+    await state.set_state(UploadDataset.dataset_name)
+    
+
+@router.callback_query(F.data == 'labeling_yes', UploadDataset.need_labeling)
+async def labeling_flow(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
+    await callback.message.answer("Придумай название датасета:")
+    await state.set_state(UploadDataset.dataset_name)
+    
 
 @router.message(UploadDataset.dataset_name)
 async def get_name(msg: Message, state: FSMContext):
@@ -86,11 +108,71 @@ async def get_name(msg: Message, state: FSMContext):
 
 
 @router.message(UploadDataset.dataset_description)
-async def get_status(msg: Message, state: FSMContext) -> None:
+async def ask_pos_label(msg: Message, state: FSMContext):
     await state.update_data(description = msg.text)
-    await msg.answer(text="Выберете статус готовности датасета:",
-                     reply_markup=status)
-    await state.set_state(UploadDataset.dataset_status)
+    await msg.answer("Название *положительного* класса (пример: `spam`):")
+    await state.set_state(UploadDataset.label_positive)
+    
+
+@router.message(UploadDataset.label_positive)
+async def ask_neg_label(msg: Message, state: FSMContext):
+    await state.update_data(label_positive = msg.text)
+    await msg.answer("Название *отрицательного* класса (пример: `ham`):")
+    await state.set_state(UploadDataset.label_negative)
+    
+
+@router.message(UploadDataset.label_negative)
+async def ask_pool(msg: Message, state: FSMContext):
+    await state.update_data(label_negative = msg.text)
+    await msg.answer("Сколько выделяем на вознаграждения? (число в TON):")
+    await state.set_state(UploadDataset.reward_pool)
+    
+
+@router.message(UploadDataset.reward_pool)
+async def confirm_info(msg: Message, state: FSMContext):
+    try:
+        pool = Decimal(msg.text)
+    except InvalidOperation:
+        return await msg.answer("Нужно число. Попробуй еще.")
+
+    data = await state.update_data(pool = pool)
+
+    text = (f"📦 *{data['dataset_name']}*\n"
+            f"Строк: {data['csv_rows']}\n"
+            f"Классы: {data['label_positive']} / {data['label_negative']}\n"
+            f"Пул наград: {pool} TON\n\n"
+            "Подтверждаем загрузку?")
+    kb = InlineKeyboardBuilder() \
+            .button(text="🚀 Запустить", callback_data="create_job") \
+            .button(text="❌ Отмена", callback_data="cancel").as_markup()
+    await msg.answer(text, reply_markup=kb, parse_mode='Markdown')
+    await state.set_state(UploadDataset.confirm)
+
+
+@router.callback_query(F.data == 'create_job', UploadDataset.confirm)
+async def finish_create(callback: CallbackQuery, state: FSMContext, session: AsyncSession):
+    await callback.answer()
+    data = await state.get_data()
+
+    ok = await Dataset.create_labeling_job(
+        session=session,
+        user_id = callback.from_user.id,
+        name = data['dataset_name'],
+        description = data['description'],
+        csv_path = f"Datasets/{data['dataset_id']}",
+        file_id = data['dataset_id'],
+        pos_label = data['label_positive'],
+        neg_label = data['label_negative'],
+        annotations_per_task = 3,
+        pool_amount = data['pool']
+    )
+
+    if ok:
+        await callback.message.edit_text("✅ Датасет принят и отправлен на разметку!")
+    else:
+        await callback.message.edit_text("❌ Не хватает средств на балансе.")
+
+    await state.clear()
 
 
 @router.callback_query(F.data == 'done')
