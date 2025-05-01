@@ -1,6 +1,6 @@
 # bot/handlers/orders_handler.py
 from __future__ import annotations
-
+from aiogram.types import FSInputFile
 import random
 from datetime import datetime
 from decimal import Decimal
@@ -172,6 +172,7 @@ async def start_labeling(
         dataset_id=dataset_id,
         pos=ds.labels["pos"],
         neg=ds.labels["neg"],
+        annotations_per_task=ds.annotations_per_task,
     )
 
     await send_next_task(
@@ -248,9 +249,34 @@ async def handle_answer(
             ),
             {"tid": task_id, "ds": dataset_id},
         )
+        
+        await session.execute(
+        text("""
+        /* 1. собираем количество голосов за TRUE и FALSE */
+        WITH votes AS (
+            SELECT
+                SUM(CASE WHEN label THEN 1 ELSE 0 END) AS pos_cnt,
+                SUM(CASE WHEN NOT label THEN 1 ELSE 0 END) AS neg_cnt
+            FROM annotations
+            WHERE task_id = :tid
+        )
+        /* 2. вставляем результат, только если задача уже набрала apt голосов */
+        INSERT INTO task_results(task_id, final_label, confidence, closed_at)
+        SELECT
+            :tid                                 AS task_id,
+            (pos_cnt >= neg_cnt)                 AS final_label,      /* TRUE, если победил pos */
+            GREATEST(pos_cnt, neg_cnt)::numeric / :apt AS confidence, /* 0.67 при 2/1 */
+            now()                                AS closed_at
+        FROM votes
+        WHERE (pos_cnt + neg_cnt) = :apt         /* все голоса собраны */
+        ON CONFLICT (task_id) DO NOTHING
+        """),
+        {"tid": task_id, "apt": data["annotations_per_task"]},
+        )
+
 
         # 5.  Попытка закрыть весь датасет
-        await maybe_finish_dataset(session, dataset_id)
+        await maybe_finish_dataset(session, dataset_id, callback.bot)
 
     # 6. Шлём следующую задачу (вне транзакции)
     await send_next_task(
@@ -337,7 +363,7 @@ async def send_next_task(
     )
     
 
-async def maybe_finish_dataset(session: AsyncSession, dataset_id: str) -> None:
+async def maybe_finish_dataset(session: AsyncSession, dataset_id: str, bot) -> None:
     """
     Если все tasks размечены → проставляем status='done', распределяем reward_pool.
     Запускать ТОЛЬКО внутри already-opened transaction!
@@ -403,8 +429,59 @@ async def maybe_finish_dataset(session: AsyncSession, dataset_id: str) -> None:
                 {"amt": amount, "uid": uid},
             )
 
-            
-
         # 3. обнуляем пул
         ds.reward_pool = 0
+        
+        # ---------- готовим размеченный csv --------------------------
+    # 1. path оригинала
+        # ---------- ищем исходный файл датасета -------------------------
+        result = await session.execute(
+        text("""
+        SELECT uri, original_name
+          FROM dataset_files
+         WHERE dataset_id = :ds
+         ORDER BY file_id
+         LIMIT 1
+        """),
+        {"ds": dataset_id},
+        )
+        file_rec = result.first()        # 👈 берём первую строку
+
+        if not file_rec:                 # могло не быть файла
+            return
+
+        uri, orig_name = file_rec        # теперь безопасно
+        orig_path = f"Datasets/{uri.split('tg://')[-1]}"   # твоя логика путей
+
+        import pandas as pd, os, json, tempfile
+
+        df = pd.read_csv(orig_path, header=None, names=["text"])
+        res = await session.execute(
+            text(
+            "SELECT task_id, final_label FROM task_results "
+            "JOIN tasks USING(task_id) "
+            "WHERE dataset_id=:ds ORDER BY task_id"
+            ),
+            {"ds": dataset_id},
+        )
+        labels = [row.final_label for row in res]
+        df["label"] = labels
+
+        tmpdir = tempfile.gettempdir()
+        out_path = os.path.join(tmpdir, f"{dataset_id}_labeled.csv")
+        df.to_csv(out_path, index=False)
+
+    # ---------- шлём автору --------------------------------------
+        nice_name = f"{ds.name}_labeled.csv"
+        
+    
+        await bot.send_document(
+            chat_id=ds.user_id,
+            document=FSInputFile(out_path, filename=nice_name),
+            caption=(
+                f"✅ Ваш датасет <b>{ds.name}</b> размечен!\n"
+                f"Прикреплён файл из <b>{len(df)}</b> строк с финальными метками."
+            ),
+            parse_mode="HTML",
+        )
 
