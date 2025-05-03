@@ -20,16 +20,14 @@ from database.orm_model import orm_get_model_info, orm_model_is_saved, orm_add_m
 
 router = Router()
 
-@router.message(Command(commands=['stop']))
+@router.message(Command("stop"))
 async def stop_model(msg: Message, state: FSMContext) -> None:
     data = await state.get_data()
-    
-    if data.get('model_run'):
-        # Здесь реально отанавливаем модель
-        await state.update_data(model_name = None, model_run = False)
-        await msg.answer(text=f"Работа модели {data.get('model_name')} прекращена.")
+    if data.get("model_run"):
+        await state.update_data(model_run=False, model_name=None)
+        await msg.answer(f"Работа модели <b>{data['model_name']}</b> прекращена.")
     else:
-        await msg.answer(text="В данный момент времени нет запущенных моделей.")
+        await msg.answer("В данный момент нет запущенных моделей.")
         
 
 
@@ -48,15 +46,15 @@ async def info(callback: CallbackQuery, session: AsyncSession) -> None:
                                          reply_markup = back_to_main_menu_mk)
     
 
-@router.callback_query(lambda c: c.data.startswith('run'))
-async def run_model(callback: CallbackQuery) -> None:
-    model = callback.data.split('_')[-1]
+# ---------- START / STOP ---------- #
+@router.callback_query(lambda c: c.data.startswith("run_"))
+async def run_model(callback: CallbackQuery, state: FSMContext) -> None:
+    model = callback.data.split("_")[-1]  # "GigaChat" и т.п.
 
-    if model:   #чуть позже добавть реальное подключение к серверу
-        await callback.message.edit_text(f"Вы используете модель {model}. Для остановки напишите команду /stop")
-    else:
-        await callback.message.edit_text("Модель не была выбрана.")
-    
+    await state.update_data(model_name=model, model_run=True)
+    await callback.message.edit_text(
+        f"Вы используете модель <b>{model}</b>. Для остановки напишите команду /stop"
+    )
     await callback.answer()
     
     
@@ -92,4 +90,23 @@ async def save_models(callback: CallbackQuery, session: AsyncSession) -> None:
     
     await callback.answer()    
     
+    
+# ----- ЧАТ С GigaChat ----- #
+@router.message(F.text)
+async def model_chat(msg: Message, state: FSMContext) -> None:
+    data = await state.get_data()
+    if not data.get("model_run") or data.get("model_name") != "GigaChat":
+        return
+
+    messages = [{"role": "user", "content": msg.text}]
+
+    gigachat = msg.bot.gigachat            # ← было  msg.bot["gigachat"]
+
+    try:
+        answer = await gigachat.chat(messages)
+    except Exception:
+        await msg.answer("⚠️ Не удалось получить ответ от GigaChat.")
+        raise
+
+    await msg.answer(answer, disable_web_page_preview=True)
     

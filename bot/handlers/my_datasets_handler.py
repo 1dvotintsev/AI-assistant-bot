@@ -56,9 +56,14 @@ async def info(callback: CallbackQuery, state: FSMContext) -> None:
 
 
 @router.callback_query(F.data == 'add_dataset')
-async def add_model(callback: CallbackQuery, state: FSMContext) -> None:
+async def add_model(callback: CallbackQuery, state: FSMContext):
+    await state.clear()                                    # на всякий случай
+    await state.update_data(user_id=callback.from_user.id) #  ⬅️  добавили
     await state.set_state(UploadDataset.adding)
-    await callback.message.edit_text(text=f"Отправьте файл с датасетом, он должен быть одно из этих форматов: {DATASET_EXTENSIONS}")
+    await callback.message.edit_text(
+        text=f"Отправьте файл с датасетом, он должен быть формата csv."
+    )
+
 
 
 @router.message(Command(commands = ['drop_form']))
@@ -68,36 +73,66 @@ async def drop_form(msg: Message, state: FSMContext) -> None:
     
 @router.message(UploadDataset.adding)
 async def get_file(msg: Message, state: FSMContext):
+    # 1) проверяем, что это CSV
+    if msg.document is None or not msg.document.file_name.lower().endswith('.csv'):
+        return await msg.answer("Пришли именно *CSV*-файл.", parse_mode='Markdown')
+
+    # 2) сохраняем на диск / в S3 и т.д.
     if not await Dataset.download(msg):
-        await msg.answer("Пришли CSV-файл.")
-        return
+        return await msg.answer("Не удалось скачать файл — попробуй ещё раз.")
 
-    ok, rows = await Dataset.verify_csv(f"Datasets/{msg.document.file_id}")
+    # 3) просто читаем, без ограничения по колонкам
+    ok, rows, cols = await Dataset.csv_info(f"Datasets/{msg.document.file_id}")
     if not ok:
-        await msg.answer("CSV должен содержать ровно одну колонку 🤷‍♂️")
-        return
+        return await msg.answer("CSV не читается 🤷‍♂️")
 
+    # 4) кладём всё в FSM-контекст
     await state.update_data(
-        dataset_id = msg.document.file_id,
+        dataset_id   = msg.document.file_id,
         dataset_size = msg.document.file_size,
-        csv_rows = rows
+        csv_rows     = rows,
+        csv_cols     = cols,      # <-- важно!
+        dataset_ext  = 'csv',
     )
+
+    # 5) спрашиваем про разметку
     await msg.answer("Требуется ли разметка датасета?", reply_markup=need_markup)
     await state.set_state(UploadDataset.need_labeling)
+
 
 
 @router.callback_query(F.data == 'labeling_no', UploadDataset.need_labeling)
 async def just_store(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
-    # …тут оставь старый сценарий (name → desc → статус) …
+
+    # ⬇️  запоминаем, что разметка не нужна
+    await state.update_data(need_labeling=False)
+
+    await callback.message.answer("Придумай название датасета:")
     await state.set_state(UploadDataset.dataset_name)
-    
+
 
 @router.callback_query(F.data == 'labeling_yes', UploadDataset.need_labeling)
 async def labeling_flow(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
+    data = await state.get_data()
+
+    if data.get('csv_cols') != 1:
+        await callback.message.answer(
+            "Для задачи разметки CSV должен содержать *ровно одну* колонку. "
+            "Пришли подходящий файл или выбери «Без разметки».",
+            parse_mode='Markdown'
+        )
+        await state.set_state(UploadDataset.need_labeling)
+        return
+
+    # ⬇️  разметка нужна
+    await state.update_data(need_labeling=True)
+
     await callback.message.answer("Придумай название датасета:")
     await state.set_state(UploadDataset.dataset_name)
+
+
     
 
 @router.message(UploadDataset.dataset_name)
@@ -108,10 +143,25 @@ async def get_name(msg: Message, state: FSMContext):
 
 
 @router.message(UploadDataset.dataset_description)
-async def ask_pos_label(msg: Message, state: FSMContext):
-    await state.update_data(description = msg.text)
-    await msg.answer("Название *положительного* класса (пример: `spam`):")
-    await state.set_state(UploadDataset.label_positive)
+async def after_description(msg: Message, state: FSMContext):
+    await state.update_data(description=msg.text)
+    data = await state.get_data()
+
+    # ───►  ЕСЛИ разметка нужна ────────
+    if data.get('need_labeling'):
+        await msg.answer("Название *положительного* класса (пример: `spam`):")
+        return await state.set_state(UploadDataset.label_positive)
+
+    # ───►  ЕСЛИ разметка не нужна ────
+    kb = InlineKeyboardBuilder() \
+            .button(text="✅ Готовый",    callback_data="done") \
+            .button(text="🕑 Не размечен", callback_data="notdone") \
+            .as_markup()
+
+    await msg.answer("Выбери статус датасета:", reply_markup=kb)
+    # дальше никаких состояний не переводим —
+    # хендлеры  `done/notdone` ловят колбэки из любого state
+
     
 
 @router.message(UploadDataset.label_positive)

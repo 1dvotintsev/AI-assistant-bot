@@ -24,6 +24,20 @@ class Dataset:
         except Exception:
             return (False, 0)
 
+    @staticmethod
+    async def csv_info(path: str) -> tuple[bool, int, int]:
+        """
+        Возвращает
+            ok, n_rows, n_cols
+        ok == False → CSV не прочитался.
+        """
+        try:
+            df = pd.read_csv(path)
+        except Exception:
+            return False, 0, 0
+
+        return True, len(df), len(df.columns)
+    
     # --- создание записи датасета + задач ------------------------------
     @staticmethod
     async def create_labeling_job(
